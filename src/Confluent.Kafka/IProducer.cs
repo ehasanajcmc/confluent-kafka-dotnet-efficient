@@ -183,6 +183,26 @@ namespace Confluent.Kafka
             Action<DeliveryReport<TKey, TValue>> deliveryHandler = null);
 
         
+#region Efficient Experimental
+        /// <summary>
+        ///     Synchronously sends raw serialized key and value bytes using the allocation-efficient producer path.
+        /// </summary>
+        /// <param name="topic">The topic to produce the message to.</param>
+        /// <param name="deliveryReportKey">The typed key preserved for the delivery report, including failures.</param>
+        /// <param name="keyBytes">The serialized key bytes, or <see langword="null"/> for a null key. Empty memory is a present zero-length key.</param>
+        /// <param name="valueBytes">The serialized value bytes, or <see langword="null"/> for a null value (a Kafka tombstone). Empty memory is a present zero-length value.</param>
+        /// <exception cref="System.InvalidOperationException">
+        ///     Thrown when efficient delivery reports were not configured, or when a legacy produce API is used
+        ///     on a producer configured for efficient delivery reports.
+        /// </exception>
+        void ProduceEfficient(
+            string topic,
+            TKey deliveryReportKey,
+            ReadOnlyMemory<byte>? keyBytes,
+            ReadOnlyMemory<byte>? valueBytes);
+#endregion
+
+
         /// <summary>
         ///     Poll for callback events.
         /// </summary>

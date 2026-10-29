@@ -114,6 +114,43 @@ namespace Confluent.Kafka
         /// </summary>
         internal protected IAsyncSerializer<TValue> AsyncValueSerializer { get; set; }
 
+#region Efficient Experimental
+        /// <summary>
+        ///     The efficient delivery report slot capacity.
+        /// </summary>
+        internal protected int DeliveryReportEfficientCapacity { get; set; }
+
+        /// <summary>
+        ///     The efficient delivery report handler.
+        /// </summary>
+        internal protected DeliveryReportEfficientHandler<TKey> DeliveryReportEfficientHandler { get; set; }
+
+        /// <summary>
+        ///     Configure synchronous efficient delivery reports with a bounded number of in-flight slots.
+        ///     ProduceEfficient blocks when all slots are in use. The callback receives a report whose raw
+        ///     error reason is valid only for the duration of the callback.
+        /// </summary>
+        /// <param name="capacity">The maximum number of messages awaiting delivery reports.</param>
+        /// <param name="handler">The global efficient delivery report callback.</param>
+        public ProducerBuilder<TKey, TValue> SetDeliveryReportEfficient(
+            int capacity,
+            DeliveryReportEfficientHandler<TKey> handler)
+        {
+            if (capacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than zero.");
+            }
+            if (handler == null)
+            {
+                throw new ArgumentNullException(nameof(handler));
+            }
+
+            this.DeliveryReportEfficientCapacity = capacity;
+            this.DeliveryReportEfficientHandler = handler;
+            return this;
+        }
+#endregion
+
         internal Producer<TKey,TValue>.Config ConstructBaseConfig(Producer<TKey, TValue> producer)
         {
             return new Producer<TKey, TValue>.Config

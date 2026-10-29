@@ -71,7 +71,13 @@ namespace Confluent.Kafka.Benchmark
         public static void Main(string[] args)
         {
             bool showHelp = false;
+            bool legacyFirst = false;
             string mode = null;
+            bool messageCountSpecified = false;
+            string benchmarkOutputPath = null;
+            string benchmarkCounts = null;
+            string allocationProfileApproach = null;
+            string allocationProfileResultPath = null;
             string bootstrapServers = "localhost:9092";
             string topicName = "dotnet-benchmark";
             string group = "benchmark-consumer-group";
@@ -86,12 +92,17 @@ namespace Confluent.Kafka.Benchmark
 
             OptionSet p = new OptionSet
             {
-                { "m|mode=", "throughput|latency", m => mode = m },
+                { "m|mode=", "throughput|latency|efficient|efficient-allocations", m => mode = m },
                 { "b|brokers=", $"bootstrap.servers (default: {bootstrapServers})", v => bootstrapServers = v },
                 { "t=", $"topic (default: {topicName})", t => topicName = t },
                 { "g=", $"consumer group (default: {group})", g => group = g },
                 { "h=", $"number of headers (default: {headerCount})", h => headerCount = int.Parse(h) },
-                { "n=", $"number of messages (default: {numberOfMessages})", n => numberOfMessages = int.Parse(n) },
+                { "n=", "number of messages (default: 5,000,000; efficient: compare 1,000 / 1,000,000 / 100,000,000)", n => { numberOfMessages = int.Parse(n); messageCountSpecified = true; } },
+                { "output=", "CSV output path for efficient comparisons (optional; overwritten)", output => benchmarkOutputPath = output },
+                { "counts=", "efficient mode: comma-separated message counts; cannot combine with -n", counts => benchmarkCounts = counts },
+                { "legacy-first", "efficient mode: run legacy first in the first comparison", v => legacyFirst = v != null },
+                { "approach=", "allocation profiling only: legacy|efficient", approach => allocationProfileApproach = approach },
+                { "profile-result=", "allocation profiling only: workload result JSON path", path => allocationProfileResultPath = path },
                 { "r=", "rate - messages per second (latency mode only). must be > 1000", (int r) => messagesPerSecond = r },
                 { "s=", $"message size (default: {messageSize})", s => messageSize = int.Parse(s) },
                 { "p=", "(re)create topic with this partition count (default: not set)", v => partitionCount = int.Parse(v) },
@@ -104,8 +115,15 @@ namespace Confluent.Kafka.Benchmark
             p.Parse(args);
 
             if (mode == null || showHelp ||
-                (messagesPerSecond != null && mode == "throughput") ||
-                (messagesPerSecond == null && mode == "latency"))
+                (mode != "throughput" && mode != "latency" && mode != "efficient" && mode != "efficient-allocations") ||
+                (messagesPerSecond != null && mode != "latency") ||
+                (messagesPerSecond == null && mode == "latency") ||
+                (benchmarkOutputPath != null && mode != "efficient") ||
+                (legacyFirst && mode != "efficient") ||
+                (benchmarkCounts != null && (mode != "efficient" || messageCountSpecified)) ||
+                (mode != "efficient-allocations" && (allocationProfileApproach != null || allocationProfileResultPath != null)) ||
+                (mode == "efficient-allocations" && (!messageCountSpecified || string.IsNullOrWhiteSpace(allocationProfileResultPath) ||
+                    (allocationProfileApproach != "legacy" && allocationProfileApproach != "efficient"))))
             {
                 Console.WriteLine("Usage:");
                 p.WriteOptionDescriptions(Console.Out);
@@ -127,6 +145,29 @@ namespace Confluent.Kafka.Benchmark
             else if (mode == "latency")
             {
                 Latency.Run(bootstrapServers, topicName, group, headerCount, messageSize, messagesPerSecond.Value, numberOfMessages, username, password);
+            }
+            else if (mode == "efficient")
+            {
+                int[] efficientMessageCounts = benchmarkCounts != null
+                    ? benchmarkCounts.Split(',').Select(count => int.Parse(count)).ToArray()
+                    : messageCountSpecified
+                        ? new[] { numberOfMessages }
+                        : new[] { 1000, 1000000, 100000000 };
+                Xperimental.Efficient.ProduceEfficientBenchmark.Run(
+                    bootstrapServers,
+                    topicName,
+                    efficientMessageCounts,
+                    messageSize,
+                    username,
+                    password,
+                    benchmarkOutputPath,
+                    legacyFirst);
+            }
+            else if (mode == "efficient-allocations")
+            {
+                Xperimental.Efficient.ProduceEfficientBenchmark.RunAllocationProfile(
+                    bootstrapServers, topicName, numberOfMessages, messageSize, username, password,
+                    allocationProfileApproach, allocationProfileResultPath);
             }
         }
     }

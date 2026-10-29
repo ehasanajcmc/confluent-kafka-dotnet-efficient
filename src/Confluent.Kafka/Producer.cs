@@ -18,6 +18,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Confluent.Kafka.Impl;
@@ -204,7 +205,6 @@ namespace Confluent.Kafka
             try
             {
                 var msg = Util.Marshal.PtrToStructure<rd_kafka_message>(rkmessage);
-
                 // the msg._private property has dual purpose. Here, it is an opaque pointer set
                 // by Topic.Produce to be an IDeliveryHandler. When Consuming, it's for internal
                 // use (hence the name).
@@ -428,6 +428,10 @@ namespace Confluent.Kafka
                 disposeHasBeenCalled = true;
             }
 
+            if (disposing)
+            {
+                this.StopEfficientDeliveryReportSends();
+            }
             // do nothing if we borrowed a handle.
             if (ownedKafkaHandle == null) { return; }
 
@@ -467,6 +471,15 @@ namespace Confluent.Kafka
                 // events are not called if kafkaHandle has been closed.
                 // this avoids deadlocks in common scenarios.
                 ownedKafkaHandle.Dispose();
+
+                if (this.efficientDeliveryReportSlots != null)
+                {
+                    lock (this.efficientDeliveryReportSlotsLock)
+                    {
+                        Array.Clear(this.efficientDeliveryReportSlots, 0, this.efficientDeliveryReportSlots.Length);
+                        this.availableEfficientDeliveryReportSlotCount = 0;
+                    }
+                }
             }
         }
 
@@ -616,6 +629,22 @@ namespace Confluent.Kafka
                 this.enableDeliveryReports = bool.Parse(enableDeliveryReportsObj);
             }
 
+            if (builder.DeliveryReportEfficientHandler != null && this.manualPoll)
+            {
+                throw new InvalidOperationException(
+                    "Efficient delivery reports require background polling. Set 'dotnet.producer.enable.background.poll' to true; " +
+                    "otherwise ProduceEfficient can block at capacity before the application can poll delivery callbacks.");
+            }
+
+            this.InitializeEfficientDeliveryReports(
+                builder.DeliveryReportEfficientCapacity,
+                builder.DeliveryReportEfficientHandler);
+
+            if (this.efficientDeliveryReportSlots != null)
+            {
+                this.DeliveryReportCallback = DeliveryReportCallbackEfficientImpl;
+            }
+
             var deliveryReportEnabledFieldsObj = config.FirstOrDefault(prop => prop.Key == ConfigPropertyNames.Producer.DeliveryReportFields).Value;
             if (deliveryReportEnabledFieldsObj != null)
             {
@@ -742,12 +771,226 @@ namespace Confluent.Kafka
         }
 
 
+        #region Efficient Experimental
+        // General Notes: 
+        // Configure a positive slot capacity and a delivery handler before using this opt-in send path.
+        // Calls block when all report slots are in use; legacy Produce and ProduceAsync are disabled in this mode.
+        // Dispose does not wait for ProduceEfficient calls. Callers must stop and drain all such threads before disposing.
+        private DeliveryReportEfficientHandler<TKey> efficientDeliveryReportHandler;
+
+        // This lock is also the Monitor gate. Together with the available-slot count it provides
+        // semaphore-style synchronization; shutdown pulses all waiters and has no semaphore to dispose.
+        private readonly object efficientDeliveryReportSlotsLock = new object();
+
+        private EfficientDeliveryReportSlot[] efficientDeliveryReportSlots;
+        private int[] availableEfficientDeliveryReportSlotStack;
+        private int availableEfficientDeliveryReportSlotCount;
+
+        private bool efficientDeliveryReportClosed;
+
+        private struct EfficientDeliveryReportSlot
+        {
+            public TKey Key;
+            public string Topic;
+            public int PayloadLength;
+            public bool IsInUse;
+        }
+
+        private void InitializeEfficientDeliveryReports(int capacity, DeliveryReportEfficientHandler<TKey> handler)
+        {
+            if (handler == null)
+            {
+                return;
+            }
+            if (capacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than zero.");
+            }
+            this.efficientDeliveryReportHandler = handler;
+            this.efficientDeliveryReportSlots = new EfficientDeliveryReportSlot[capacity];
+            this.availableEfficientDeliveryReportSlotStack = new int[capacity];
+            this.availableEfficientDeliveryReportSlotCount = capacity;
+            for (int i = 0; i < capacity; i++)
+            {
+                this.availableEfficientDeliveryReportSlotStack[i] = i;
+            }
+            this.enableDeliveryReports = true;
+        }
+
+        private unsafe void DeliveryReportCallbackEfficientImpl(IntPtr rk, IntPtr rkmessage, IntPtr opaque)
+        {
+            if (ownedKafkaHandle.IsClosed || rkmessage == IntPtr.Zero) { return; }
+
+            try
+            {
+                // Read the native message directly so PtrToStructure does not allocate for each efficient delivery report.
+                rd_kafka_message msg = *(rd_kafka_message*)rkmessage;
+                this.DeliveryReportCallbackEfficient(msg);
+            }
+            catch (Exception e)
+            {
+                handlerException = e;
+            }
+        }
+
+        private void DeliveryReportCallbackEfficient(rd_kafka_message msg)
+        {
+            int efficientSlotId = msg._private.ToInt32() - 1;
+            if ((uint)efficientSlotId >= (uint)this.efficientDeliveryReportSlots.Length)
+            {
+                return;
+            }
+
+            ReadOnlySpan<byte> errorReason = ReadOnlySpan<byte>.Empty;
+            if (msg.err != ErrorCode.NoError)
+            {
+                string errorString = KafkaHandle.CreatePossiblyFatalError(msg.err, null).Reason;
+                errorReason = Encoding.UTF8.GetBytes(errorString);
+            }
+
+            DeliveryReportEfficient<TKey> report;
+            lock (this.efficientDeliveryReportSlotsLock)
+            {
+                if (!this.efficientDeliveryReportSlots[efficientSlotId].IsInUse)
+                {
+                    return;
+                }
+
+                EfficientDeliveryReportSlot slot = this.efficientDeliveryReportSlots[efficientSlotId];
+                report = new DeliveryReportEfficient<TKey>(
+                    slot.Key,
+                    msg.err,
+                    msg.err == ErrorCode.Local_Fatal,
+                    errorReason,
+                    slot.Topic,
+                    new Partition(msg.partition),
+                    new Offset(msg.offset),
+                    slot.PayloadLength);
+
+                this.efficientDeliveryReportSlots[efficientSlotId] = default(EfficientDeliveryReportSlot);
+                if (!this.efficientDeliveryReportClosed)
+                {
+                    this.availableEfficientDeliveryReportSlotStack[this.availableEfficientDeliveryReportSlotCount++] = efficientSlotId;
+                    Monitor.Pulse(this.efficientDeliveryReportSlotsLock);
+                }
+            }
+
+            this.efficientDeliveryReportHandler(report);
+        }
+
+        private void EnsureLegacyProduceIsEnabled()
+        {
+            if (this.efficientDeliveryReportSlots != null)
+            {
+                throw new InvalidOperationException("Produce and ProduceAsync cannot be used when efficient delivery reports are configured.");
+            }
+        }
+
+        private int AcquireEfficientDeliveryReportSlot(TKey key, string topic, int payloadLength)
+        {
+            lock (this.efficientDeliveryReportSlotsLock)
+            {
+                while (this.availableEfficientDeliveryReportSlotCount <= 0 && !this.efficientDeliveryReportClosed)
+                {
+                    Monitor.Wait(this.efficientDeliveryReportSlotsLock);
+                }
+
+                if (this.efficientDeliveryReportClosed)
+                {
+                    throw new ObjectDisposedException(nameof(Producer<TKey, TValue>));
+                }
+
+                int slotId = this.availableEfficientDeliveryReportSlotStack[--this.availableEfficientDeliveryReportSlotCount];
+                this.efficientDeliveryReportSlots[slotId] = new EfficientDeliveryReportSlot
+                {
+                    Key = key,
+                    Topic = topic,
+                    PayloadLength = payloadLength,
+                    IsInUse = true
+                };
+                return slotId;
+            }
+        }
+
+        private void ReleaseEfficientDeliveryReportSlot(int slotId)
+        {
+            lock (this.efficientDeliveryReportSlotsLock)
+            {
+                if (!this.efficientDeliveryReportSlots[slotId].IsInUse)
+                {
+                    return;
+                }
+
+                this.efficientDeliveryReportSlots[slotId] = default(EfficientDeliveryReportSlot);
+                if (!this.efficientDeliveryReportClosed)
+                {
+                    this.availableEfficientDeliveryReportSlotStack[this.availableEfficientDeliveryReportSlotCount++] = slotId;
+                    Monitor.Pulse(this.efficientDeliveryReportSlotsLock);
+                }
+            }
+        }
+
+        private void StopEfficientDeliveryReportSends()
+        {
+            if (this.efficientDeliveryReportSlots == null)
+            {
+                return;
+            }
+
+            lock (this.efficientDeliveryReportSlotsLock)
+            {
+                this.efficientDeliveryReportClosed = true;
+                Monitor.PulseAll(this.efficientDeliveryReportSlotsLock);
+            }
+        }
+
+        /// <inheritdoc/>
+        public void ProduceEfficient(
+            string topic,
+            TKey deliveryReportKey,
+            ReadOnlyMemory<byte>? keyBytes,
+            ReadOnlyMemory<byte>? valueBytes)
+        {
+            if (this.efficientDeliveryReportSlots == null)
+            {
+                throw new InvalidOperationException("Efficient delivery reports must be configured before calling ProduceEfficient.");
+            }
+
+            int slotId = this.AcquireEfficientDeliveryReportSlot(deliveryReportKey, topic, valueBytes?.Length ?? 0);
+            bool produced = false;
+            try
+            {
+                ErrorCode err = KafkaHandle.Produce(
+                    topic,
+                    valueBytes,
+                    keyBytes,
+                    Partition.Any.Value,
+                    Timestamp.Default.UnixTimestampMs,
+                    null,
+                    new IntPtr(slotId + 1));
+                if (err != ErrorCode.NoError)
+                {
+                    throw new KafkaException(KafkaHandle.CreatePossiblyFatalError(err, null));
+                }
+                produced = true;
+            }
+            finally
+            {
+                if (!produced)
+                {
+                    this.ReleaseEfficientDeliveryReportSlot(slotId);
+                }
+            }
+        }
+        #endregion
+
         /// <inheritdoc/>
         public async Task<DeliveryResult<TKey, TValue>> ProduceAsync(
             TopicPartition topicPartition,
             Message<TKey, TValue> message,
             CancellationToken cancellationToken)
         {
+            EnsureLegacyProduceIsEnabled();
             Headers headers = message.Headers ?? new Headers();
 
             byte[] keyBytes;
@@ -866,6 +1109,7 @@ namespace Confluent.Kafka
             Message<TKey, TValue> message,
             Action<DeliveryReport<TKey, TValue>> deliveryHandler = null)
         {
+            EnsureLegacyProduceIsEnabled();
             if (deliveryHandler != null && !enableDeliveryReports)
             {
                 throw new InvalidOperationException("A delivery handler was specified, but delivery reports are disabled.");

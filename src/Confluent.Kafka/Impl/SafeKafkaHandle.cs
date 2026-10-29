@@ -445,6 +445,65 @@ namespace Confluent.Kafka.Impl
             }
         }
 
+#region Efficient Experimental
+        internal unsafe ErrorCode Produce(
+            string topic,
+            ReadOnlyMemory<byte>? val,
+            ReadOnlyMemory<byte>? key,
+            int partition,
+            long timestamp,
+            IReadOnlyList<IHeader> headers,
+            IntPtr opaque)
+        {
+            byte emptyByte = 0;
+            IntPtr headersPtr = marshalHeaders(headers);
+            ReadOnlySpan<byte> valueSpan = val.HasValue ? val.Value.Span : ReadOnlySpan<byte>.Empty;
+            ReadOnlySpan<byte> keySpan = key.HasValue ? key.Value.Span : ReadOnlySpan<byte>.Empty;
+
+            fixed (byte* valuePointer = valueSpan)
+            fixed (byte* keyPointer = keySpan)
+            {
+                IntPtr valuePtr = !val.HasValue
+                    ? IntPtr.Zero
+                    : valueSpan.IsEmpty ? (IntPtr)(&emptyByte) : (IntPtr)valuePointer;
+                IntPtr keyPtr = !key.HasValue
+                    ? IntPtr.Zero
+                    : keySpan.IsEmpty ? (IntPtr)(&emptyByte) : (IntPtr)keyPointer;
+
+                try
+                {
+                    ErrorCode errorCode = Librdkafka.produceva(
+                        handle,
+                        topic,
+                        partition,
+                        (IntPtr)MsgFlags.MSG_F_COPY,
+                        valuePtr,
+                        (UIntPtr)valueSpan.Length,
+                        keyPtr,
+                        (UIntPtr)keySpan.Length,
+                        timestamp,
+                        headersPtr,
+                        opaque);
+
+                    if (errorCode != ErrorCode.NoError && headersPtr != IntPtr.Zero)
+                    {
+                        Librdkafka.headers_destroy(headersPtr);
+                    }
+
+                    return errorCode;
+                }
+                catch
+                {
+                    if (headersPtr != IntPtr.Zero)
+                    {
+                        Librdkafka.headers_destroy(headersPtr);
+                    }
+                    throw;
+                }
+            }
+        }
+#endregion
+
         private static int[] MarshalCopy(IntPtr source, int length)
         {
             int[] res = new int[length];

@@ -1,282 +1,131 @@
-Confluent's .NET Client for Apache Kafka®
-=========================================
+# Confluent Kafka .NET — ZeroAlloc Fork
 
-[![Chat on Slack](https://img.shields.io/badge/chat-on%20slack-7A5979.svg)](https://launchpass.com/confluentcommunity)
+An experimental fork with zero per-message managed allocations on the successful producer path.
 
-**confluent-kafka-dotnet** is Confluent's .NET client for [Apache Kafka](http://kafka.apache.org/) and the
-[Confluent Platform](https://www.confluent.io/product/).
+Pass serialized key and value buffers directly to `ProduceEfficient`. We skip per-message serialization and wrapper objects, and use preallocated slots to track delivery reports.
 
-Features:
+## How to use
 
-- **High performance** - confluent-kafka-dotnet is a lightweight wrapper around
-[librdkafka](https://github.com/edenhill/librdkafka), a finely tuned C
-client.
-
-- **Reliability** - There are a lot of details to get right when writing an Apache Kafka
-client. We get them right in one place (librdkafka) and leverage this work
-across all of our clients (also [confluent-kafka-python](https://github.com/confluentinc/confluent-kafka-python)
-and [confluent-kafka-go](https://github.com/confluentinc/confluent-kafka-go)).
-
-- **Supported** - Commercial support is offered by
-[Confluent](https://confluent.io/).
-
-- **Future proof** - Confluent, founded by the
-original creator/co-creator of Kafka, is building a [streaming platform](https://www.confluent.io/product/)
-with Apache Kafka at its core. It's high priority for us that client features keep
-pace with core Apache Kafka and components of the [Confluent Platform](https://www.confluent.io/product/).
-
-confluent-kafka-dotnet is derived from Andreas Heider's [rdkafka-dotnet](https://github.com/ah-/rdkafka-dotnet).
-We're fans of his work and were very happy to have been able to leverage rdkafka-dotnet as the basis of this
-client. Thanks Andreas!
-
-## Referencing
-
-confluent-kafka-dotnet is distributed via NuGet. We provide the following  packages:
-
-- [Confluent.Kafka](https://www.nuget.org/packages/Confluent.Kafka/) *[netstandard2.0, net462, net6.0, net8.0]* - The core client library.
-- [Confluent.SchemaRegistry.Serdes.Avro](https://www.nuget.org/packages/Confluent.SchemaRegistry.Serdes.Avro/) *[netstandard2.0, net6.0, net8.0]* - Provides a serializer and deserializer for working with Avro serialized data with Confluent Schema Registry integration.
-- [Confluent.SchemaRegistry.Serdes.Protobuf](https://www.nuget.org/packages/Confluent.SchemaRegistry.Serdes.Protobuf/) *[netstandard2.0, net6.0, net8.0]* - Provides a serializer and deserializer for working with Protobuf serialized data with Confluent Schema Registry integration.
-- [Confluent.SchemaRegistry.Serdes.Json](https://www.nuget.org/packages/Confluent.SchemaRegistry.Serdes.Json/) *[netstandard2.0, net6.0, net8.0]* - Provides a serializer and deserializer for working with Json serialized data with Confluent Schema Registry integration.
-- [Confluent.SchemaRegistry](https://www.nuget.org/packages/Confluent.SchemaRegistry/) *[netstandard2.0, net6.0, net8.0]* - Confluent Schema Registry client (a dependency of the Confluent.SchemaRegistry.Serdes packages).
-- [Confluent.SchemaRegistry.Encryption](https://www.nuget.org/packages/Confluent.SchemaRegistry.Encryption/) *[net6.0, net8.0]* - Confluent Schema Registry client-side field-level encryption client (a dependency of the other Confluent.SchemaRegistry.Encryption.* packages).
-- [Confluent.SchemaRegistry.Encryption.Aws](https://www.nuget.org/packages/Confluent.SchemaRegistry.Encryption.Aws/) *[net6.0, net8.0]* - Confluent Schema Registry client-side field-level encryption client for AWS KMS.
-- [Confluent.SchemaRegistry.Encryption.Azure](https://www.nuget.org/packages/Confluent.SchemaRegistry.Encryption.Azure/) *[net6.0, net8.0]* - Confluent Schema Registry client-side field-level encryption client for Azure Key Vault.
-- [Confluent.SchemaRegistry.Encryption.Gcp](https://www.nuget.org/packages/Confluent.SchemaRegistry.Encryption.Gcp/) *[net6.0, net8.0]* - Confluent Schema Registry client-side field-level encryption client for Google Cloud KMS.
-- [Confluent.SchemaRegistry.Encryption.HcVault](https://www.nuget.org/packages/Confluent.SchemaRegistry.Encryption.HcVault/) *[net6.0, net8.0]* - Confluent Schema Registry client-side field-level encryption client for Hashicorp Vault.
-- [Confluent.SchemaRegistry.Rules](https://www.nuget.org/packages/Confluent.SchemaRegistry.Rules/) *[net6.0, net8.0]* - Confluent Schema Registry client-side support for data quality rules (via the Common Expression Language) and schema migration rules (via JSONata).
-
-To install Confluent.Kafka from within Visual Studio, search for Confluent.Kafka in the NuGet Package Manager UI, or run the following command in the Package Manager Console:
-
-```
-Install-Package Confluent.Kafka -Version 2.14.0
-```
-
-To add a reference to a dotnet core project, execute the following at the command line:
-
-```
-dotnet add package -v 2.14.0 Confluent.Kafka
-```
-
-Note: `Confluent.Kafka` depends on the `librdkafka.redist` package which provides a number of different builds of `librdkafka` that are compatible with [common platforms](https://github.com/edenhill/librdkafka/wiki/librdkafka.redist-NuGet-package-runtime-libraries). If you are on one of these platforms this will all work seamlessly (and you don't need to explicitly reference `librdkafka.redist`). If you are on a different platform, you may need to [build librdkafka](https://github.com/edenhill/librdkafka#building) manually (or acquire it via other means) and load it using the [Library.Load](https://docs.confluent.io/current/clients/confluent-kafka-dotnet/api/Confluent.Kafka.Library.html#Confluent_Kafka_Library_Load_System_String_) method.
-
-### Branch builds
-
-Nuget packages corresponding to all commits to release branches are available from the following nuget package source (Note: this is not a web URL - you
-should specify it in the nuget package manager):
-[https://ci.appveyor.com/nuget/confluent-kafka-dotnet](https://ci.appveyor.com/nuget/confluent-kafka-dotnet). The version suffix of these nuget packages
-matches the appveyor build number. You can see which commit a particular build number corresponds to by looking at the
-[AppVeyor build history](https://ci.appveyor.com/project/ConfluentClientEngineering/confluent-kafka-dotnet/history)
-
-
-## Usage
-
-For a step-by-step guide and code samples, see [Getting Started with Apache Kafka and .NET](https://developer.confluent.io/get-started/dotnet/) on [Confluent Developer](https://developer.confluent.io/).
-
-You can also take the free self-paced training course [Apache Kafka for .NET Developers](https://developer.confluent.io/learn-kafka/apache-kafka-for-dotnet/) on [Confluent Developer](https://developer.confluent.io/).
-
-Take a look in the [examples](examples) directory and at the [integration tests](test/Confluent.Kafka.IntegrationTests/Tests) for further examples.
-
-For an overview of configuration properties, refer to the [librdkafka documentation](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md).
-
-### Basic Producer Examples
-
-You should use the `ProduceAsync` method if you would like to wait for the result of your produce
-requests before proceeding. You might typically want to do this in highly concurrent scenarios,
-for example in the context of handling web requests. Behind the scenes, the client will manage
-optimizing communication with the Kafka brokers for you, batching requests as appropriate.
-
-```csharp
-using System;
-using System.Threading.Tasks;
-using Confluent.Kafka;
-
-class Program
-{
-    public static async Task Main(string[] args)
-    {
-        var config = new ProducerConfig { BootstrapServers = "localhost:9092" };
-
-        // If serializers are not specified, default serializers from
-        // `Confluent.Kafka.Serializers` will be automatically used where
-        // available. Note: by default strings are encoded as UTF8.
-        using (var p = new ProducerBuilder<Null, string>(config).Build())
-        {
-            try
-            {
-                var dr = await p.ProduceAsync("test-topic", new Message<Null, string> { Value = "test" });
-                Console.WriteLine($"Delivered '{dr.Value}' to '{dr.TopicPartitionOffset}'");
-            }
-            catch (ProduceException<Null, string> e)
-            {
-                Console.WriteLine($"Delivery failed: {e.Error.Reason}");
-            }
-        }
-    }
-}
-```
-
-Note that a server round-trip is slow (3ms at a minimum; actual latency depends on many factors).
-In highly concurrent scenarios you will achieve high overall throughput out of the producer using
-the above approach, but there will be a delay on each `await` call. In stream processing
-applications, where you would like to process many messages in rapid succession, you would typically
-use the `Produce` method instead:
+Build the producer once, then reuse it and your serialized buffers for each send:
 
 ```csharp
 using System;
 using Confluent.Kafka;
 
-class Program
+// 1. Prepare serialized key/value bytes. These sample arrays are allocated once.
+// In your application, serialize into reusable or pooled buffers.
+byte[] keyBuffer = new byte[] { 1, 2, 3 };
+byte[] valueBuffer = new byte[] { 4, 5, 6 };
+const string topic = "events";
+
+// 2. Configure the producer. The int type is the delivery-report key type;
+// the Kafka key and value are passed separately as serialized bytes below.
+// Background polling must stay enabled (the default) to process reports.
+// The using declaration disposes the producer when this scope ends.
+using var producer = new ProducerBuilder<int, byte[]>(new ProducerConfig
 {
-    public static void Main(string[] args)
+    BootstrapServers = "localhost:9092"
+})
+    // 3. Enable efficient-only mode and preallocate 1,024 report slots.
+    // This producer must use ProduceEfficient; Produce and ProduceAsync throw.
+    // If all slots are occupied, a send waits until a report releases one.
+    .SetDeliveryReportEfficient(1024, report =>
     {
-        var conf = new ProducerConfig { BootstrapServers = "localhost:9092" };
+        // One handler receives delivery outcomes for all efficient sends.
+        // report.Key identifies the send. Use the report only in this callback.
+        // Successful reports do no logging here, avoiding logging allocations.
+        if (report.ErrorCode != ErrorCode.NoError)
+            Console.Error.WriteLine($"Delivery {report.Key} failed: {report.ErrorCode}");
+    })
+    .Build();
 
-        Action<DeliveryReport<Null, string>> handler = r =>
-            Console.WriteLine(!r.Error.IsError
-                ? $"Delivered message to {r.TopicPartitionOffset}"
-                : $"Delivery Error: {r.Error.Reason}");
+// 4. Send the serialized bytes. The report key is application bookkeeping;
+// it does not replace the serialized Kafka key.
+producer.ProduceEfficient(
+    topic,
+    deliveryReportKey: 1,
+    keyBytes: keyBuffer.AsMemory(),
+    valueBytes: valueBuffer.AsMemory());
+// librdkafka has copied the bytes when this call returns: reuse the buffers now.
+// Delivery completes later and is reported through the handler above.
 
-        using (var p = new ProducerBuilder<Null, string>(conf).Build())
-        {
-            for (int i = 0; i < 100; ++i)
-            {
-                p.Produce("my-topic", new Message<Null, string> { Value = i.ToString() }, handler);
-            }
-
-            // wait for up to 10 seconds for any inflight messages to be delivered.
-            p.Flush(TimeSpan.FromSeconds(10));
-        }
-    }
-}
+// 5. At shutdown, stop new publications and wait for all publishing threads
+// to finish. Then drain outstanding deliveries and callbacks before disposal.
+producer.Flush();
 ```
 
-### Basic Consumer Example
+### Important notes
 
-```csharp
-using System;
-using System.Threading;
-using Confluent.Kafka;
+- **Important - shutdown:** the owner must stop accepting new publications, drain its publisher queue, and wait for all threads calling `ProduceEfficient` to finish. Then call `Flush` to complete outstanding deliveries and callbacks before disposing the producer. Keep background polling enabled throughout this drain. `Dispose` does not wait for active produce calls and is not a substitute for draining. If you use `Flush(TimeSpan)`, a nonzero return value means messages or callbacks are still outstanding; handle that before disposal.
+- ⚠️ Serialize into reusable buffers before calling `ProduceEfficient`. It accepts nullable `ReadOnlyMemory<byte>` for the key and value; `null` means absent (a null value is a Kafka tombstone), while empty memory means a present zero-length field.
+- ⚠️ The producer copies both payloads before the synchronous call returns, so you can reuse the buffers immediately afterward.
+- ⚠️ Keep the topic string reusable, and avoid per-message arrays, `ToByteArray()`, or allocating serializers if you want zero per-message managed allocations.
+- ⚠️ Efficient delivery reports require background polling (enabled by default). Configure enough slots for the number of in-flight messages; `ProduceEfficient` waits when all slots are occupied. Do not turn off background polling for this mode.
+- ⚠️ Reports are callback-scoped. Use their fields inside the callback and do not retain the report or its raw `ErrorReason` span. The callback includes the error code, fatal flag, raw reason, topic, partition, offset, payload length, and the typed report key.
+- ⚠️ This path currently uses the default partition and timestamp, and does not support headers. Do not use it with dependent producers created from the same handle.
 
-class Program
-{
-    public static void Main(string[] args)
-    {
-        var conf = new ConsumerConfig
-        {
-            GroupId = "test-consumer-group",
-            BootstrapServers = "localhost:9092",
-            // Note: The AutoOffsetReset property determines the start offset in the event
-            // there are not yet any committed offsets for the consumer group for the
-            // topic/partitions of interest. By default, offsets are committed
-            // automatically, so in this example, consumption will only start from the
-            // earliest message in the topic 'my-topic' the first time you run the program.
-            AutoOffsetReset = AutoOffsetReset.Earliest
-        };
+## Proposed approach
 
-        using (var c = new ConsumerBuilder<Ignore, string>(conf).Build())
-        {
-            c.Subscribe("my-topic");
+We remove per-message managed work from both sending and delivery reporting, while keeping enough state to report the outcome of each message:
 
-            CancellationTokenSource cts = new CancellationTokenSource();
-            Console.CancelKeyPress += (_, e) => {
-                // Prevent the process from terminating.
-                e.Cancel = true;
-                cts.Cancel();
-            };
+1. **Send serialized buffers directly.** `ProduceEfficient` bypasses the regular message and serializer path. It pins the supplied memory for the native call and uses librdkafka's `MSG_F_COPY` flag. librdkafka copies the bytes before the call returns, so the caller can immediately reuse or return its buffers to a pool.
 
-            try
-            {
-                while (true)
-                {
-                    try
-                    {
-                        var cr = c.Consume(cts.Token);
-                        Console.WriteLine($"Consumed message '{cr.Value}' at: '{cr.TopicPartitionOffset}'.");
-                    }
-                    catch (ConsumeException e)
-                    {
-                        Console.WriteLine($"Error occured: {e.Error.Reason}");
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Ensure the consumer leaves the group cleanly and final offsets are committed.
-                c.Close();
-            }
-        }
-    }
-}
+2. **Reserve a slot before sending.** Building the producer preallocates a fixed-size slot array and a stack of free slot indexes. Each send reserves one slot containing the typed delivery-report key, topic, original value byte length, and an in-use marker. The native message carries `slot index + 1` in its opaque field, linking its eventual delivery report back to this state without allocating a per-message tracking object or `GCHandle`.
+
+3. **Reconstruct the report on success or failure.** The callback reads the native message directly and uses its opaque value to find the slot. The key, topic, and payload length come from the slot, so they remain available even on failure, without relying on the returned payload. `ErrorCode`, partition, and offset come from the native result; `IsFatal` is set when the native code is `Local_Fatal`. Failed reports also carry a UTF-8 error reason. These fields form a callback-scoped `ref struct`. The callback copies the slot's metadata into the report, clears and returns the slot, then invokes the application's handler outside the lock. Successful reports avoid managed allocations; constructing the error reason on failure can allocate.
+
+4. **Apply bounded backpressure.** Reserving and releasing slots share a lock. If no slot is free, the sending thread waits with `Monitor.Wait`, which releases the lock while waiting. Returning a slot calls `Monitor.Pulse` to wake a waiting sender. This bounds tracking storage and outstanding messages awaiting report processing. Background polling must remain enabled so reports can release slots while senders wait. If the native send is rejected synchronously, the call throws a `KafkaException` and returns its slot in `finally`; that rejected send does not wait for a delivery callback.
+
+5. **Drain before shutdown.** The owner must stop and drain publishing threads, then flush outstanding messages and callbacks before disposal. Internally, disposal closes slot admission and wakes all waiting senders, which throw `ObjectDisposedException`. It then stops background polling, destroys the owned native handle, and clears retained slot references. Waking blocked senders does not wait for calls already using the native handle, so the owner must coordinate their completion first.
+
+The result is zero per-message managed allocations for the measured efficient path. Native memory is still allocated: librdkafka manages its own allocations and frees, and the .NET wrapper frees the temporary topic-conversion memory after the native call.
+
+## Benchmarks
+
+The **1M and 10M** results are single runs measured on 28 October 2026. Both paths reuse the same 100-byte key and 100-byte value buffers, with a shared 10,000-message sliding in-flight limit and a 10,000-message warmup before each run.
+
+### Setup
+
+- The benchmark runs on the host machine (Windows, Intel Core Ultra 9 185H, Release/net8.0), with Kafka running locally in Docker on the same machine.
+- Kafka uses the test infrastructure in [test/docker/docker-compose-kraft.yaml](test/docker/docker-compose-kraft.yaml): the `apache/kafka:4.0.0` image, with one node acting as both broker and KRaft controller.
+- The producer connects to `127.0.0.1:9092` over plaintext; Docker maps this to port 29092 in the container. The `dotnet-benchmark` topic has four partitions and replication factor one, using the [test broker configuration](test/docker/kraft/server.properties).
+- Both approaches use background delivery polling and a 5 ms linger. The efficient producer preallocates 10,000 delivery-report slots.
+
+Start the local Kafka infrastructure from the repository root:
+
+```powershell
+docker compose -f test/docker/docker-compose-kraft.yaml up -d kafka
 ```
 
-### IHostedService and Web Application Integration
-
-The [Web](https://github.com/confluentinc/confluent-kafka-dotnet/tree/master/examples/Web) example demonstrates how to integrate
-Apache Kafka with a web application, including how to implement `IHostedService` to realize a long running consumer poll loop, how to
-register a producer as a singleton service, and how to bind configuration from an injected `IConfiguration` instance.
-
-### Exactly Once Processing
-
-The .NET Client has full support for transactions and idempotent message production, allowing you to write horizontally scalable stream
-processing applications with exactly once semantics. The [ExactlyOnce](examples/ExactlyOnce) example demonstrates this capability by way
-of an implementation of the classic "word count" problem, also demonstrating how to use the [FASTER](https://github.com/microsoft/FASTER)
-Key/Value store (similar to RocksDb) to materialize working state that may be larger than available memory, and incremental rebalancing
-to avoid stop-the-world rebalancing operations and unnecessary reloading of state when you add or remove processing nodes.
-
-### Schema Registry Integration
-
-The three "Serdes" packages provide serializers and deserializers for Avro, Protobuf and JSON with [Confluent Schema Registry](https://docs.confluent.io/current/schema-registry/docs/index.html) integration. The `Confluent.SchemaRegistry` nuget package provides a client for interfacing with
-Schema Registry's REST API.
-
-**Note:** All three serialization formats are supported across Confluent Platform. They each make different tradeoffs, and you should use the one that best matches to your requirements. Avro is well suited to the streaming data use-case, but the **quality** and **maturity** of the non-Java implementations lags that of Java - this is an important consideration. Protobuf and JSON both have great support in .NET.
-
-### Error Handling
-
-Errors delivered to a client's error handler should be considered informational except when the `IsFatal` flag
-is set to `true`, indicating that the client is in an un-recoverable state. Currently, this can only happen on
-the producer, and only when `enable.idempotence` has been set to `true`. In all other scenarios, clients will
-attempt to recover from all errors automatically.
-
-Although calling most methods on the clients will result in a fatal error if the client is in an un-recoverable
-state, you should generally only need to explicitly check for fatal errors in your error handler, and handle
-this scenario there.
-
-#### Producer
-
-When using `Produce`, to determine whether a particular message has been successfully delivered to a cluster,
-check the `Error` field of the `DeliveryReport` during the delivery handler callback.
-
-When using `ProduceAsync`, any delivery result other than `NoError` will cause the returned `Task` to be in the
-faulted state, with the `Task.Exception` field set to a `ProduceException` containing information about the message
-and error via the `DeliveryResult` and `Error` fields. Note: if you `await` the call, this means a `ProduceException`
-will be thrown.
-
-#### Consumer
-
-All `Consume` errors will result in a `ConsumeException` with further information about the error and context
-available via the `Error` and `ConsumeResult` fields.
+The producer and broker share the host's resources, so Docker, CPU and disk activity can affect timing and throughput.
 
 
-### 3rd Party
+| Messages | Approach | Runs | Managed bytes allocated | Mean produce call, µs | Mean throughput, msg/s |
+| ---: | :--- | ---: | ---: | ---: | ---: |
+| 1,000,000 | Regular | 1 | 480,008,112 | 2.669 | 289,725 |
+| 1,000,000 | Efficient | 1 | 0 | 1.549 | 409,807 |
+| 10,000,000 | Regular | 1 | 4,800,079,664 | 1.862 | 286,064 |
+| 10,000,000 | Efficient | 1 | 0 | 1.219 | 466,885 |
 
-There are numerous libraries that expand on the capabilities provided by Confluent.Kafka, or use Confluent.Kafka
-to integrate with Kafka. For more information, refer to the [3rd Party Libraries](3RD_PARTY.md) page.
+![Regular and efficient producer: allocations, produce-call time, and throughput](doc/benchmarks/efficient-producer.svg)
 
-### Confluent Cloud
+The efficient path allocated **0 managed bytes in both measured runs**. Every run delivered all messages with zero delivery errors.
 
-For a step-by-step guide on using the .NET client with Confluent Cloud see [Getting Started with Apache Kafka and .NET](https://developer.confluent.io/get-started/dotnet/) on [Confluent Developer](https://developer.confluent.io/).
+Throughput is delivered messages divided by elapsed seconds, including sending and waiting for all delivery reports. It is the average rate over the whole run, not a separate one-second test. Setup and warmup are excluded. Average produce-call time is active send-loop duration divided by message count. It excludes explicit capacity waits but includes loop and capacity-check overhead, so it does not measure broker acknowledgement latency. Each path sends continuously from one thread, waiting only when the in-flight limit is reached and draining once after the last send. Capacity waits use the same adaptive SpinWait policy on both paths.
+The 100M streaming comparison failed before a complete pair of results was saved and is excluded.
+```powershell
+.\test\Confluent.Kafka.Benchmark\Xperimental\Efficient\Profile-Allocations.ps1 `
+    -Counts 1000000,10000000 `
+    -OutputDirectory .\benchmark-results
+```
 
-You can also refer to the [Confluent Cloud example](examples/ConfluentCloud) which demonstrates how to configure the .NET client for use with
-[Confluent Cloud](https://www.confluent.io/confluent-cloud/).
+**About the numbers:** allocation figures are exact managed-byte counts from the sending and background delivery threads during the measured interval. They are not object counts, and native allocations are not measured. Timings and the throughput derived from them are approximate: runs use the same machine, broker configuration, inputs, and warmup, but background load, scheduling, GC, and broker/disk state can still differ. Both sizes are single-run observations.
 
-### Developer Notes
+## References
 
-Instructions on building and testing confluent-kafka-dotnet can be found [here](DEVELOPER.md).
+- [Confluent's original .NET Kafka client](https://github.com/confluentinc/confluent-kafka-dotnet) — the upstream project this fork is based on; see its README for general client documentation.
+- [G-Research's experimental Kafka .NET work](https://github.com/G-Research/confluent-kafka-dotnet) — inspiration for the allocation-efficient producer approach.
 
-Copyright (c)
-2016-2019 [Confluent Inc.](https://www.confluent.io)
-2015-2016 [Andreas Heider](mailto:andreas@heider.io)
+Licensed under [Apache 2.0](LICENSE). Original copyright: 2016–2019 Confluent Inc.; 2015–2016 Andreas Heider.
 
-KAFKA is a registered trademark of The Apache Software Foundation and has been licensed for use
-by confluent-kafka-dotnet. confluent-kafka-dotnet has no affiliation with and is not endorsed by
-The Apache Software Foundation.
+KAFKA is a registered trademark of The Apache Software Foundation and has been licensed for use by confluent-kafka-dotnet. This project has no affiliation with and is not endorsed by The Apache Software Foundation.

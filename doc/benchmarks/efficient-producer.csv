@@ -1,0 +1,5 @@
+Messages,Approach,KeyBytes,ValueBytes,DurationSeconds,ProduceSeconds,DeliveryWaitSeconds,MessagesPerSecond,AllocatedBytes,ProduceAllocatedBytes,DeliveryAllocatedBytes,BytesPerMessage,Gen0,Gen1,Gen2,Delivered,Errors,SenderAllocatedBytes,SenderWaitAllocatedBytes,AllocatedObjects,Pattern,MaxInFlight,Run,MeasuredDate,FirstApproach
+1000000,Efficient,100,100,2.440175,1.5492075,0.8909647,409806.67370168125,0,0,0,0,0,0,0,1000000,0,0,0,N/A,Streaming,10000,run-a11abdc9f34443d7bc6a644cac000ab7,2026-10-28,Efficient
+1000000,Legacy,100,100,3.4515522,2.6685485,0.7829999,289724.72153253254,480008112,80000000,400008112,480.008112,38,0,0,1000000,0,80000000,0,N/A,Streaming,10000,run-a11abdc9f34443d7bc6a644cac000ab7,2026-10-28,Efficient
+10000000,Efficient,100,100,21.4185374,12.1863503,9.232184,466885.28788151516,0,0,0,0,0,0,0,10000000,0,0,0,N/A,Streaming,10000,run-a11abdc9f34443d7bc6a644cac000ab7,2026-10-28,Legacy
+10000000,Legacy,100,100,34.9572066,18.6161171,16.3410868,286064.0472342547,4800079664,800000000,4000079664,480.0079664,382,120,0,10000000,0,800000000,0,N/A,Streaming,10000,run-a11abdc9f34443d7bc6a644cac000ab7,2026-10-28,Legacy
